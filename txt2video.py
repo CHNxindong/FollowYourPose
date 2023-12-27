@@ -23,11 +23,19 @@ from diffusers.utils.import_utils import is_xformers_available
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
+from PIL import Image
 from followyourpose.models.unet import UNet3DConditionModel
 from followyourpose.data.hdvila import HDVilaDataset
 from followyourpose.pipelines.pipeline_followyourpose import FollowYourPosePipeline
 from followyourpose.util import save_videos_grid, ddim_inversion
 from einops import rearrange
+
+from controlnet_aux.processor import Processor
+import torchvision
+from PIL import ImageSequence
+import imageio
+import numpy as np
+import cv2
 
 import sys
 sys.path.append('FollowYourPose')
@@ -108,6 +116,23 @@ def main(
     if gradient_checkpointing:
         unet.enable_gradient_checkpointing()
 
+    # homework
+    video_path = "/mnt/disk_1/dongxin/FollowYourPose-main/pose_example/follow_your_pose/pose_4/Monkeys on the sea.gif"
+    processor = Processor("depth_midas")
+    img = Image.open(video_path)
+    pil_annotation = []
+    t = 0
+    print('video_length', validation_data.video_length)
+    videoCapture = cv2.VideoCapture(video_path)
+    depth_video_fps = videoCapture.get(cv2.CAP_PROP_FPS)
+    for frame in ImageSequence.Iterator(img):
+        if t == validation_data.video_length:
+            break
+        pil_annotation.append(processor(frame, to_pil=True))
+        t = t + 1
+    video_cond = [np.array(p).astype(np.uint8) for p in pil_annotation]
+    imageio.mimsave(f"/mnt/disk_1/dongxin/FollowYourPose/depth_video/Ironman.mp4",
+                    video_cond, fps=depth_video_fps)
 
     # Get the validation pipeline
     validation_pipeline = FollowYourPosePipeline(
@@ -148,7 +173,9 @@ def main(
             load_path = resume_from_checkpoint
             output_dir = os.path.abspath(os.path.join(resume_from_checkpoint, ".."))
         accelerator.print(f"load from checkpoint {load_path}")
-        accelerator.load_state(load_path)
+        # accelerator.load_state(load_path)
+        # homework
+        accelerator.load_state(load_path, strict=False)
 
         global_step = int(load_path.split("-")[-1])
 
@@ -165,8 +192,9 @@ def main(
         now = str(datetime.now())
         # print(now)
         for idx, prompt in enumerate(validation_data.prompts):
+            # homework
             sample = validation_pipeline(prompt, generator=generator, latents=ddim_inv_latent,
-                                        skeleton_path=skeleton_path,
+                                        skeleton_path=skeleton_path, images=pil_annotation, depth_video_fps=depth_video_fps,
                                         **validation_data).videos
             save_videos_grid(sample, f"{output_dir}/inference/sample-{global_step}-{str(seed)}-{now}/{prompt}.gif")
             samples.append(sample)

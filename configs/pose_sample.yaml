@@ -1,12 +1,17 @@
-pretrained_model_path: "./checkpoints/stable-diffusion-v1-4"
-output_dir: "output"
+pretrained_model_path: "/mnt/disk_1/dongxin/checkpoints/stable-diffusion-v1-5"
+output_dir: "/mnt/disk_1/dongxin/FollowYourPose/output"
 
 
 validation_data:
   prompts:
-    - "Iron man on the beach"
-    - "Stormtrooper on the sea"
-    - "Astronaut on the beach"
+#    - "A Iron man on the beach"
+    - "Monkeys on the sea"
+#    - "Batman on the street"
+    - "Stormtroopers on the moon"
+    - "astronauts in the desert"
+    - "Robots, on mountain"
+    - "Stormtroopers in the park, Van Gogh style"
+    - "Iron man in Antarctica"
   video_length: 32
   width: 512
   height: 512
@@ -20,7 +25,7 @@ validation_data:
 train_batch_size: 1
 validation_steps: 100
 
-resume_from_checkpoint: ./checkpoints/followyourpose_checkpoint-1000
+resume_from_checkpoint: /mnt/disk_1/dongxin/FollowYourPose-main/checkpoints/followyourpose_checkpoint-1000
 
 
 seed: 33

@@ -31,6 +31,13 @@ from torchvision import transforms
 import torchvision.transforms._transforms_video as transforms_video
 import decord
 
+import PIL
+import numpy as np
+from diffusers.utils import PIL_INTERPOLATION
+import imageio
+import torch.nn as nn
+from typing import Any, Callable, Dict, List, Optional, Union
+
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -39,6 +46,32 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 class FollowYourPosePipelineOutput(BaseOutput):
     videos: Union[torch.Tensor, np.ndarray]
 
+# homework
+def _preprocess_adapter_image(image, height, width):
+    if isinstance(image, torch.Tensor):
+        return image
+    elif isinstance(image, PIL.Image.Image):
+        image = [image]
+
+    if isinstance(image[0], PIL.Image.Image):
+        image = [np.array(i.resize((width, height), resample=PIL_INTERPOLATION["lanczos"])) for i in image]
+        image = [
+            i[None, ..., None] if i.ndim == 2 else i[None, ...] for i in image
+        ]  # expand [h, w] or [h, w, c] to [b, h, w, c]
+        image = np.concatenate(image, axis=0)
+        image = np.array(image).astype(np.float32) / 255.0
+        image = image.transpose(0, 3, 1, 2)
+        image = torch.from_numpy(image)
+    elif isinstance(image[0], torch.Tensor):
+        if image[0].ndim == 3:
+            image = torch.stack(image, dim=0)
+        elif image[0].ndim == 4:
+            image = torch.cat(image, dim=0)
+        else:
+            raise ValueError(
+                f"Invalid image tensor! Expecting image tensor with 3 or 4 dimension, but recive: {image[0].ndim}"
+            )
+    return image
 
 class FollowYourPosePipeline(DiffusionPipeline):
     _optional_components = []
@@ -330,11 +363,18 @@ class FollowYourPosePipeline(DiffusionPipeline):
         callback_steps: Optional[int] = 1,
         skeleton_path: Optional[str] = None,
         frame_skeleton_stride: int = 5,
+        # homework
+        images: Union[torch.Tensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
+        depth_video_fps: int = 32,
         **kwargs,
     ):
         # Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
+
+        # homework
+        adapter_input = _preprocess_adapter_image(images, height, width)
+        # adapter_input = _preprocess_adapter_image(images, 512, 512)
 
         # Check inputs. Raise error if not correct
         self.check_inputs(prompt, height, width, callback_steps)
@@ -376,9 +416,12 @@ class FollowYourPosePipeline(DiffusionPipeline):
 
         # Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
-        
-        skeleton, save_skeleton = self.get_skeleton(skeleton_path, video_length, frame_skeleton_stride)
+
+        # homework
+        skeleton, save_skeleton = self.get_skeleton(skeleton_path, depth_video_fps, video_length, frame_skeleton_stride)
         skeleton = skeleton.to(latents.device).repeat(2,1,1,1,1)
+        # homework
+        adapter_input = adapter_input.to(latents.device).repeat(2, 1, 1, 1, 1)
         
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -386,8 +429,9 @@ class FollowYourPosePipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
+                # homework
                 # predict the noise residual
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings, skeleton=skeleton, train_or_sample='sample').sample.to(dtype=latents_dtype)
+                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings, skeleton=skeleton, train_or_sample='sample', depth=adapter_input).sample.to(dtype=latents_dtype)
 
                 # perform guidance
                 if do_classifier_free_guidance:
@@ -419,7 +463,7 @@ class FollowYourPosePipeline(DiffusionPipeline):
     
     
     @torch.no_grad()
-    def get_skeleton(self,skeleton_path, video_length=None, frame_skeleton_stride=None):
+    def get_skeleton(self,skeleton_path, depth_video_fps, video_length=None, frame_skeleton_stride=None):
         skeleton_start_end = list(range(0, video_length * frame_skeleton_stride, frame_skeleton_stride))
         self_transform = transforms.Compose([transforms.Resize(512),
                                         transforms_video.CenterCropVideo(512)])
@@ -429,6 +473,12 @@ class FollowYourPosePipeline(DiffusionPipeline):
 
         # for start_end in skeleton_start_end:
         skeleton = vr_skeleton.get_batch(skeleton_start_end)
+
+        # video_cond_skeleton = [np.array(p).astype(np.uint8) for p in skeleton.asnumpy()]
+        video_cond_skeleton = [p for p in skeleton.asnumpy()]
+        imageio.mimsave(f"/mnt/disk_1/dongxin/FollowYourPose/skeleton_video/Ironman.mp4",
+                        video_cond_skeleton, fps=depth_video_fps)
+
         if not isinstance(skeleton,torch.Tensor):
             skeleton = torch.from_numpy(skeleton.asnumpy()).float()
         skeleton_video_trans = self_transform(skeleton.permute(3, 0, 1, 2))

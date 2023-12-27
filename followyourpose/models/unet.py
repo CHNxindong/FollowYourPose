@@ -212,8 +212,14 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         self.conv_out = InflatedConv3d(block_out_channels[0], out_channels, kernel_size=3, padding=1)
         
         self.skeleton_adapter = Adapter(cin=int(3*64), channels=[320, 640, 1280, 1280][:4], nums_rb=2, ksize=1, sk=True, use_conv=False)
-        adapter_weight = torch.load('./checkpoints/pose_encoder.pth')
+        adapter_weight = torch.load('/mnt/disk_1/dongxin/FollowYourPose-main/checkpoints/pose_encoder.pth')
         self.skeleton_adapter.load_state_dict(adapter_weight)
+
+        # homework
+        self.depth_adapter = Adapter(cin=int(3 * 64), channels=[320, 640, 1280, 1280][:4], nums_rb=2, ksize=1, sk=True,
+                                     use_conv=False)
+        adapter_weight = torch.load('/mnt/disk_1/dongxin/FollowYourPose-main/checkpoints/t2iadapter_depth_sd15v2.pth')
+        self.depth_adapter.load_state_dict(adapter_weight)
         
         
     def set_attention_slice(self, slice_size):
@@ -294,6 +300,8 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         attention_mask: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         skeleton: Optional[torch.FloatTensor] = None,
+        # homework
+        depth: Optional[torch.FloatTensor] = None,
         train_or_sample: str = 'train',
     ) -> Union[UNet3DConditionOutput, Tuple]:
         r"""
@@ -371,7 +379,15 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
 
         # down
         down_block_res_samples = (sample,)
-        features_adapter = self.skeleton_adapter(skeleton)
+        # features_adapter = self.skeleton_adapter(skeleton)
+        # homework
+        # features_adapter = self.skeleton_adapter(skeleton)
+        features_adapter_skeleton = self.skeleton_adapter(skeleton)
+        features_adapter_depth = self.depth_adapter(depth)
+
+        features_adapter = []
+        for ske, dep in zip(features_adapter_skeleton, features_adapter_depth):
+            features_adapter.append(ske + dep)
         
         for idx, downsample_block in enumerate(self.down_blocks):
             
